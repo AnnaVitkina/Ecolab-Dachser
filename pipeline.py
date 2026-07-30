@@ -130,6 +130,25 @@ def _default_cli_argv() -> list[str]:
     return _strip_jupyter_args(sys.argv[1:])
 
 
+def _in_notebook() -> bool:
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        return shell is not None and shell.__class__.__name__ in (
+            "ZMQInteractiveShell",
+            "Shell",
+        )
+    except ImportError:
+        return False
+
+
+def _should_raise_system_exit() -> bool:
+    if _IN_COLAB or _in_notebook():
+        return False
+    return True
+
+
 def colab_run(source_path: Path | None = None) -> PipelineResult:
     """Run the pipeline in Colab/notebooks without CLI argument parsing."""
     result = run_pipeline(source_path)
@@ -155,13 +174,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     exit_code = main()
-    if _IN_COLAB:
-        pass
-    else:
-        try:
-            from IPython import get_ipython
-
-            if get_ipython() is None:
-                raise SystemExit(exit_code)
-        except ImportError:
-            raise SystemExit(exit_code)
+    if _should_raise_system_exit():
+        raise SystemExit(exit_code)
