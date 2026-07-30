@@ -68,6 +68,17 @@ def _in_notebook() -> bool:
         return False
 
 
+def _should_raise_system_exit() -> bool:
+    if _in_notebook():
+        return False
+    try:
+        from project_paths import is_colab_environment
+
+        return not is_colab_environment()
+    except ImportError:
+        return True
+
+
 def _run() -> int:
     code_dir = _resolve_code_dir()
     _ensure_code_on_path(code_dir)
@@ -85,4 +96,6 @@ def _run() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(_run())
+    exit_code = _run()
+    if _should_raise_system_exit():
+        raise SystemExit(exit_code)
