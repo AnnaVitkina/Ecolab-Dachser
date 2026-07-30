@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,9 @@ from build_matrix import build_matrix_workbook
 from clean_di_json import write_cleaned_json
 from file_selection import prompt_input_json
 from postal_zones import postal_zones_txt_path_for_matrix
-from project_paths import OUTPUT_DIR, PROCESSING_DIR, ensure_workspace_dirs
+from project_paths import OUTPUT_DIR, PROCESSING_DIR, ensure_workspace_dirs, is_colab_environment
+
+_IN_COLAB = is_colab_environment()
 
 
 @dataclass(frozen=True)
@@ -95,7 +98,49 @@ def print_summary(result: PipelineResult) -> None:
     print(f"  Field blocks:    {result.field_block_count}")
 
 
-def main() -> None:
+def _strip_jupyter_args(argv: list[str]) -> list[str]:
+    """Drop ``-f connection.json`` and other kernel flags from notebook argv."""
+    cleaned: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg in ("-f", "--f"):
+            index += 2
+            continue
+        if arg.startswith("-") and arg not in ("-",):
+            index += 1
+            continue
+        cleaned.append(arg)
+        index += 1
+    return cleaned
+
+
+def _default_cli_argv() -> list[str]:
+    """Ignore Jupyter/Colab kernel flags such as ``-f connection.json``."""
+    if _IN_COLAB:
+        return []
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is not None and shell.__class__.__name__ in (
+            "ZMQInteractiveShell",
+            "Shell",
+        ):
+            return []
+    except ImportError:
+        pass
+    return _strip_jupyter_args(sys.argv[1:])
+
+
+def colab_run(source_path: Path | None = None) -> PipelineResult:
+    """Run the pipeline in Colab/notebooks without CLI argument parsing."""
+    result = run_pipeline(source_path)
+    print_summary(result)
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run Dachser rate pipeline (clean JSON + matrix XLSX)."
     )
@@ -105,10 +150,21 @@ def main() -> None:
         type=Path,
         help="Azure DI JSON in input/ (optional; prompts if omitted)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv if argv is not None else _default_cli_argv())
     result = run_pipeline(args.source)
     print_summary(result)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    if _IN_COLAB:
+        pass
+    else:
+        try:
+            from IPython import get_ipython
+
+            if get_ipython() is None:
+                raise SystemExit(exit_code)
+        except ImportError:
+            raise SystemExit(exit_code)
