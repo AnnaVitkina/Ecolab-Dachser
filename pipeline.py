@@ -99,16 +99,13 @@ def print_summary(result: PipelineResult) -> None:
 
 
 def _strip_jupyter_args(argv: list[str]) -> list[str]:
-    """Drop ``-f connection.json`` and other kernel flags from notebook argv."""
+    """Drop ``-f connection.json`` kernel flags from notebook argv."""
     cleaned: list[str] = []
     index = 0
     while index < len(argv):
         arg = argv[index]
         if arg in ("-f", "--f"):
             index += 2
-            continue
-        if arg.startswith("-") and arg not in ("-",):
-            index += 1
             continue
         cleaned.append(arg)
         index += 1
