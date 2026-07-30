@@ -8,16 +8,13 @@ from pathlib import Path
 COLAB_CODE_DIR = Path("/content/Ecolab-Dachser")
 
 COLAB_INPUT_DIR = Path(
-    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT_Ecolab/RMT_DACHSER/input"
+    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team /Documents/AI Adoption RMT/RMT_Ecolab/RMT_DACHSER/input"
 )
 COLAB_PROCESSING_DIR = Path(
-    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT_Ecolab/RMT_DACHSER/processing"
+    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team /Documents/AI Adoption RMT/RMT_Ecolab/RMT_DACHSER/processing"
 )
 COLAB_OUTPUT_DIR = Path(
-    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT_Ecolab/RMT_DACHSER/output"
+    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team /Documents/AI Adoption RMT/RMT_Ecolab/RMT_DACHSER/output"
 )
 
 
