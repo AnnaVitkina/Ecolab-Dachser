@@ -38,7 +38,11 @@ def _ensure_code_on_path() -> None:
 
 _ensure_code_on_path()
 
-from pipeline import main
+from pipeline import colab_run, main
+from project_paths import is_colab_environment
 
 if __name__ == "__main__":
-    main()
+    if is_colab_environment():
+        colab_run()
+    else:
+        raise SystemExit(main())
