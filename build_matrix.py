@@ -61,9 +61,13 @@ SHIPMENT_HEADERS = [
 ]
 
 PARCEL_PIECE_TYPES = ("KN", "KT", "DR")
-PALLET_PIECE_TYPES = ("EW", "IP", "EU", "F", "IB", "DR")
-PARCEL_BRACKET_LABELS: tuple[str, ...] = tuple(f"<={n}" for n in range(1, 11)) + (">10",)
+CARTON_PIECE_TYPES = ("KN", "KT", "DR")
+PALLET_PIECE_TYPES = ("EW", "IP", "EU", "F", "IB")
+PARCEL_BRACKET_LABELS: tuple[str, ...] = ("<=10",)
+CARTON_BRACKET_LABELS: tuple[str, ...] = ("Flat",)
 PALLET_BRACKET_LABELS: tuple[str, ...] = tuple(f"<={n}" for n in range(1, 19))
+ZONE_E_IE_NAME = "IE Zone E"
+ZONE_E_GB_NAME = "GB Zone E"
 
 DEFAULT_APPLY_IF = "Apply if: Applies in all items"
 
@@ -117,9 +121,20 @@ def _zone_letter(zone_header: str) -> str:
     return first_line
 
 
-def _destination_postal_zone(zone_header: str) -> str:
+@dataclass(frozen=True)
+class LaneSpec:
+    origin_country: str
+    destination_zone: str
+
+
+def _lanes_for_zone(zone_header: str) -> list[LaneSpec]:
     letter = _zone_letter(zone_header)
-    return f"IE Zone {letter}"
+    if letter == "E":
+        return [
+            LaneSpec(ORIGIN_COUNTRY, ZONE_E_IE_NAME),
+            LaneSpec(ORIGIN_COUNTRY, ZONE_E_GB_NAME),
+        ]
+    return [LaneSpec(ORIGIN_COUNTRY, f"IE Zone {letter}")]
 
 
 def _main_cost_rates(main_costs: list[dict[str, Any]]) -> dict[int, dict[str, float]]:
@@ -144,18 +159,34 @@ def _main_cost_rates(main_costs: list[dict[str, Any]]) -> dict[int, dict[str, fl
     return rates
 
 
-def _parcel_source_pallet(bracket_label: str) -> int:
-    if bracket_label == ">10":
-        return 1
-    if bracket_label.startswith("<="):
-        return int(bracket_label[2:])
-    raise ValueError(f"Unknown parcel bracket label: {bracket_label}")
-
-
 def _pallet_source_pallet(bracket_label: str) -> int:
     if bracket_label.startswith("<="):
         return int(bracket_label[2:])
     raise ValueError(f"Unknown pallet bracket label: {bracket_label}")
+
+
+def _find_main_cost_row(
+    rows: list[dict[str, Any]], pallets_value: str
+) -> dict[str, Any] | None:
+    target = pallets_value.casefold()
+    for row in rows:
+        if str(row.get("Pallets", "")).strip().casefold() == target:
+            return row
+    return None
+
+
+def _carton_piece_rates(main_costs: list[dict[str, Any]]) -> dict[str, float]:
+    row = _find_main_cost_row(main_costs, "per piece")
+    if row is None:
+        return {}
+    rates: dict[str, float] = {}
+    for zone_key, raw in row.items():
+        if not str(zone_key).startswith("Zone"):
+            continue
+        amount = _parse_euro(raw)
+        if amount is not None:
+            rates[str(zone_key)] = amount
+    return rates
 
 
 def _find_additional_row(
@@ -183,44 +214,63 @@ def _zone_mapped_value(
 @dataclass(frozen=True)
 class ProductSpec:
     code: str
-    parcel: bool
+    kind: str
 
 
-def _kind_label(*, parcel: bool) -> str:
-    return "Parcel" if parcel else "Pallet"
+def _kind_label(spec: ProductSpec) -> str:
+    if spec.kind == "parcel":
+        return f"Parcel {spec.code}"
+    if spec.kind == "pallet":
+        return f"Pallet {spec.code}"
+    return spec.code
 
 
 def _iter_product_specs() -> list[ProductSpec]:
     specs: list[ProductSpec] = [
-        ProductSpec(code=code, parcel=True) for code in PARCEL_PIECE_TYPES
+        ProductSpec(code=code, kind="parcel") for code in PARCEL_PIECE_TYPES
     ]
-    specs.extend(ProductSpec(code=code, parcel=False) for code in PALLET_PIECE_TYPES)
+    specs.extend(ProductSpec(code=code, kind="carton") for code in CARTON_PIECE_TYPES)
+    specs.extend(ProductSpec(code=code, kind="pallet") for code in PALLET_PIECE_TYPES)
     return specs
 
 
 def _bracket_labels_for_product(spec: ProductSpec) -> tuple[str, ...]:
-    return PARCEL_BRACKET_LABELS if spec.parcel else PALLET_BRACKET_LABELS
+    if spec.kind == "parcel":
+        return PARCEL_BRACKET_LABELS
+    if spec.kind == "carton":
+        return CARTON_BRACKET_LABELS
+    return PALLET_BRACKET_LABELS
 
 
-def _source_pallet_qty(spec: ProductSpec, bracket_label: str) -> int:
-    if spec.parcel:
-        return _parcel_source_pallet(bracket_label)
-    return _pallet_source_pallet(bracket_label)
+def _rate_for_product(
+    spec: ProductSpec,
+    zone_key: str,
+    *,
+    pallet_rates: dict[int, dict[str, float]],
+    carton_rates: dict[str, float],
+    bracket_label: str,
+) -> float | None:
+    if spec.kind == "carton":
+        return carton_rates.get(zone_key)
+    if spec.kind == "parcel":
+        return pallet_rates.get(1, {}).get(zone_key)
+    source_pallet = _pallet_source_pallet(bracket_label)
+    return pallet_rates.get(source_pallet, {}).get(zone_key)
 
 
 def _transport_title(spec: ProductSpec) -> str:
-    kind = _kind_label(parcel=spec.parcel)
-    return f"Transport cost ({kind} {spec.code})"
+    return f"Transport cost ({_kind_label(spec)})"
 
 
 def _second_delivery_title(spec: ProductSpec) -> str:
-    kind = _kind_label(parcel=spec.parcel)
-    return f"Second Delivery ({kind} {spec.code})"
+    return f"Second Delivery ({_kind_label(spec)})"
 
 
 def _product_rate_by(spec: ProductSpec) -> str:
-    if spec.parcel:
-        return "Rate by: Per pallet (1-10; >10 uses bracket 1)"
+    if spec.kind == "parcel":
+        return "Rate by: Per pallet (<=10)"
+    if spec.kind == "carton":
+        return "Rate by: Per piece"
     return "Rate by: Per pallet (1-18)"
 
 
@@ -317,6 +367,9 @@ def build_matrix(
     header_row = main_costs[0]
     zone_keys = [key for key in header_row if key.startswith("Zone")]
     pallet_rates = _main_cost_rates(main_costs)
+    carton_rates = _carton_piece_rates(main_costs)
+    carton_header_row = _find_main_cost_row(main_costs, "Cartons & Drums")
+    carton_rate_row = _find_main_cost_row(main_costs, "per piece")
 
     second_delivery_row = _find_additional_row(
         additional2, "2nd Delivery Charge"
@@ -344,20 +397,19 @@ def build_matrix(
     for zone_key in zone_keys:
         zone_header = str(header_row.get(zone_key, ""))
         zone_letter = _zone_letter(zone_header)
-
-        shipment = {
-            "Origin Country": ORIGIN_COUNTRY,
-            "Destination Postal Code Zone": _destination_postal_zone(zone_header),
-            "Destination City": None,
-        }
         costs: dict[tuple[str, str], float | None] = {}
 
         for spec in _iter_product_specs():
             transport_title = _transport_title(spec)
             second_title = _second_delivery_title(spec)
             for bracket_label in _bracket_labels_for_product(spec):
-                source_pallet = _source_pallet_qty(spec, bracket_label)
-                rate = pallet_rates.get(source_pallet, {}).get(zone_key)
+                rate = _rate_for_product(
+                    spec,
+                    zone_key,
+                    pallet_rates=pallet_rates,
+                    carton_rates=carton_rates,
+                    bracket_label=bracket_label,
+                )
                 costs[(transport_title, bracket_label)] = rate
                 costs[(second_title, bracket_label)] = rate
 
@@ -385,13 +437,23 @@ def build_matrix(
         booking_block = ancillary_blocks[4]
         costs[cost_key(booking_block, booking_block.columns[0])] = booking_flat
 
-        matrix_rows.append(MatrixRow(shipment=shipment, costs=costs))
+        for lane in _lanes_for_zone(zone_header):
+            shipment = {
+                "Origin Country": lane.origin_country,
+                "Destination Postal Code Zone": lane.destination_zone,
+                "Destination City": None,
+            }
+            matrix_rows.append(MatrixRow(shipment=shipment, costs=dict(costs)))
 
     for row in main_costs:
         pallets = str(row.get("Pallets", "")).strip()
         if pallets in {"Pallet Qty"}:
             continue
         if pallets.isdigit() and 1 <= int(pallets) <= 18:
+            continue
+        if carton_header_row is not None and row is carton_header_row:
+            continue
+        if carton_rate_row is not None and row is carton_rate_row:
             continue
         skipped.append(
             SkippedItem(
