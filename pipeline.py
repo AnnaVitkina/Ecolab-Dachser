@@ -12,7 +12,7 @@ from pathlib import Path
 from build_matrix import build_matrix_workbook
 from clean_di_json import write_cleaned_json
 from file_selection import prompt_input_json
-from postal_zones import postal_zones_txt_path_for_matrix
+from postal_zones import postal_zones_from_fields, postal_zones_txt_path_for_matrix
 from project_paths import OUTPUT_DIR, PROCESSING_DIR, ensure_workspace_dirs, is_colab_environment
 
 _IN_COLAB = is_colab_environment()
@@ -69,10 +69,7 @@ def run_pipeline(source_path: Path | None = None) -> PipelineResult:
 
     print("\n[2/2] Building matrix workbook...")
     matrix_path = run_matrix_step(cleaned_path)
-    main_costs = fields.get("MainCosts") or []
-    zone_row_count = len(
-        [key for key in (main_costs[0] if main_costs else {}) if str(key).startswith("Zone")]
-    )
+    zone_row_count = len(postal_zones_from_fields(fields)) if fields else 0
     print(f"      Wrote {matrix_path}")
     zones_txt_path = postal_zones_txt_path_for_matrix(matrix_path)
     print(f"      Wrote {zones_txt_path}")
